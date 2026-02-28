@@ -1,0 +1,757 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+import * as THREE from "three";
+
+const SYSTEM_PROMPT = `You are BOOT-UP, an expert AI engineering agent specializing in Arduino, robotics, electronics, embedded systems, and hardware engineering.
+You have deep knowledge of all Arduino boards, ESP32, ESP8266, Raspberry Pi, STM32, sensors (HC-SR04, DHT22, PIR, BMP280, MPU6050, OLED, servo, LDR, soil moisture, IR sensor, relay, MQ-2 gas sensor, DS18B20, RFID RC522, L298N motor driver), circuit design, PCB layout, C/C++, MicroPython, and protocols: I2C, SPI, UART, CAN, USB.
+Be concise, technical, and helpful. Use **bold** for key terms and \`code\` for code snippets.`;
+
+// ── BOARDS ───────────────────────────────────────────────────────────────────
+const BOARDS = {
+  "arduino uno":       { title:"ARDUINO UNO R3",         specs:"ATmega328P · 16MHz · 32KB Flash · 14 Digital I/O · 6 Analog",              color:0x1a5c99, size:[5.4,0.2,6.8],  shape:"uno"  },
+  "arduino mega":      { title:"ARDUINO MEGA 2560",      specs:"ATmega2560 · 16MHz · 256KB Flash · 54 Digital I/O · 16 Analog",            color:0x1a5c99, size:[5.3,0.2,10.1], shape:"mega" },
+  "arduino nano":      { title:"ARDUINO NANO",           specs:"ATmega328P · 16MHz · 32KB Flash · 22 I/O · Mini Form Factor",              color:0x1a5c99, size:[1.8,0.15,4.3], shape:"nano" },
+  "arduino pro mini":  { title:"ARDUINO PRO MINI",       specs:"ATmega328P · 8/16MHz · 32KB Flash · Ultra Compact · 3.3V/5V",             color:0x8B0000, size:[1.8,0.12,3.3], shape:"nano" },
+  "arduino due":       { title:"ARDUINO DUE",            specs:"SAM3X8E ARM · 84MHz · 512KB Flash · 54 Digital I/O · USB-OTG",            color:0x006080, size:[5.3,0.2,10.1], shape:"mega" },
+  "arduino leonardo":  { title:"ARDUINO LEONARDO",       specs:"ATmega32U4 · 16MHz · 32KB Flash · Native USB · HID Support",              color:0x006040, size:[4.5,0.2,6.8],  shape:"uno"  },
+  "arduino micro":     { title:"ARDUINO MICRO",          specs:"ATmega32U4 · 16MHz · 32KB Flash · Native USB · Breadboard-friendly",      color:0x006040, size:[1.8,0.15,4.8], shape:"nano" },
+  "esp32":             { title:"ESP32 DEVKIT V1",        specs:"Dual-core Xtensa LX6 · 240MHz · 4MB Flash · WiFi+BT · 34 GPIO",          color:0x1a1a1a, size:[2.8,0.15,5.2], shape:"esp"  },
+  "esp8266":           { title:"ESP8266 NodeMCU",        specs:"Xtensa L106 · 80MHz · 4MB Flash · 802.11b/g/n WiFi · 11 GPIO",           color:0x1a1a1a, size:[3.0,0.15,5.8], shape:"esp"  },
+  "raspberry pi pico": { title:"RASPBERRY PI PICO",      specs:"RP2040 Dual-Core · 133MHz · 264KB SRAM · 26 GPIO · USB 1.1",             color:0x006040, size:[2.1,0.12,5.1], shape:"nano" },
+  "raspberry pi 5":    { title:"RASPBERRY PI 5",         specs:"BCM2712 Quad-Core A76 · 2.4GHz · 4/8GB LPDDR4X · PCIe 2.0 · 40-pin GPIO",color:0x7a1a1a,size:[6.8,0.2,9.0],  shape:"rpi5" },
+  "raspberry pi 4":    { title:"RASPBERRY PI 4B",        specs:"BCM2711 Quad-Core A72 · 1.8GHz · 2/4/8GB LPDDR4 · USB-C · Dual HDMI",   color:0x7a1a1a, size:[6.8,0.2,8.8],  shape:"rpi5" },
+  "stm32":             { title:"STM32 BLUE PILL",        specs:"STM32F103 · 72MHz · 64KB Flash · 37 GPIO · CAN/USB/SPI/I2C",             color:0x1a1a6e, size:[2.3,0.12,5.3], shape:"nano" },
+};
+
+// ── SENSORS ──────────────────────────────────────────────────────────────────
+const SENSORS = {
+  "hc-sr04":       { title:"HC-SR04 ULTRASONIC",    specs:"Distance: 2cm–400cm · Accuracy: ±3mm · 5V · Trigger+Echo · 40kHz",     type:"hcsr04",    pins:4, color:0x1a3a6e },
+  "ultrasonic":    { title:"HC-SR04 ULTRASONIC",    specs:"Distance: 2cm–400cm · Accuracy: ±3mm · 5V · Trigger+Echo · 40kHz",     type:"hcsr04",    pins:4, color:0x1a3a6e },
+  "dht22":         { title:"DHT22 TEMP/HUMIDITY",   specs:"Temp: -40–80°C ±0.5°C · Humidity: 0–100% ±2–5% · Single-wire",        type:"dht22",     pins:3, color:0x2a2a2a },
+  "dht11":         { title:"DHT11 TEMP/HUMIDITY",   specs:"Temp: 0–50°C ±2°C · Humidity: 20–80% ±5% · 3–5V · Single-wire",      type:"dht11",     pins:3, color:0x1a4a2a },
+  "pir":           { title:"HC-SR501 PIR SENSOR",   specs:"Detection range: 3–7m · Angle: 120° · 5–20V · Adjustable delay",      type:"pir",       pins:3, color:0xffffff },
+  "bmp280":        { title:"BMP280 PRESSURE",       specs:"Pressure: 300–1100hPa · Temp: -40–85°C · I2C/SPI · 1.71–3.6V",       type:"bmp280",    pins:4, color:0x1a1a1a },
+  "mpu6050":       { title:"MPU-6050 IMU",          specs:"6-DoF: 3-axis gyro + 3-axis accel · I2C · ±16g · ±2000°/s",          type:"mpu6050",   pins:4, color:0x1a1a1a },
+  "oled":          { title:"OLED 0.96\" DISPLAY",   specs:"128×64px · SSD1306 · I2C/SPI · 3.3-5V · 0.96 inch",                  type:"oled",      pins:4, color:0x000000 },
+  "servo":         { title:"SG90 MICRO SERVO",      specs:"Torque: 1.8kg·cm · Speed: 0.1s/60° · 4.8–6V · 180° rotation",       type:"servo",     pins:3, color:0x2244aa },
+  "ldr":           { title:"LDR LIGHT SENSOR",      specs:"Resistance: 1kΩ (light) – 10MΩ (dark) · Analog out · 3.3–5V",        type:"ldr",       pins:2, color:0xdddddd },
+  "soil moisture": { title:"SOIL MOISTURE SENSOR",  specs:"Analog+Digital output · LM393 comparator · 3.3–5V · Adjustable",     type:"soilmoist", pins:3, color:0x2a5a1a },
+  "ir sensor":     { title:"IR OBSTACLE SENSOR",    specs:"Detection: 2–30cm · Digital output · 5V · Adjustable sensitivity",   type:"ir",        pins:3, color:0x1a1a1a },
+  "relay":         { title:"5V RELAY MODULE",       specs:"250V AC / 30V DC · 10A · Optocoupler isolated · Active LOW",         type:"relay",     pins:3, color:0x1a3a6e },
+  "mq2":           { title:"MQ-2 GAS SENSOR",       specs:"LPG/Smoke/H2/Methane · Analog+Digital · 5V · Preheat 20s",           type:"mq2",       pins:4, color:0x222222 },
+  "ds18b20":       { title:"DS18B20 TEMP PROBE",    specs:"Temp: -55–125°C ±0.5°C · 1-Wire protocol · 3–5.5V · Waterproof",    type:"ds18b20",   pins:3, color:0x333333 },
+  "rfid":          { title:"RFID RC522 MODULE",     specs:"13.56MHz · ISO14443A · SPI · 3.3V · Read/Write · 50mm range",        type:"rfid",      pins:7, color:0x003366 },
+  "l298n":         { title:"L298N MOTOR DRIVER",    specs:"Dual H-bridge · 2A per channel · 5–46V · PWM speed control",        type:"l298n",     pins:6, color:0x222222 },
+  "neopixel":      { title:"WS2812B NEOPIXEL RING", specs:"RGB LED · 5V · Single data wire · 256 levels per channel · Chainable",type:"neopixel",  pins:3, color:0x111111 },
+};
+
+function matchBoard(name) {
+  const n = name.trim().toLowerCase();
+  for (const key of Object.keys(BOARDS)) {
+    if (n===key || n.includes(key) || key.includes(n)) return { key, ...BOARDS[key] };
+  }
+  return null;
+}
+function matchSensor(name) {
+  const n = name.trim().toLowerCase();
+  for (const key of Object.keys(SENSORS)) {
+    if (n===key || n.includes(key) || key.includes(n)) return { key, ...SENSORS[key] };
+  }
+  return null;
+}
+
+// ── MATERIALS ────────────────────────────────────────────────────────────────
+function buildMats() {
+  const M = c => new THREE.MeshStandardMaterial(c);
+  return {
+    pcb:        M({color:0x1a5e2a, roughness:0.35, metalness:0.15}),
+    chip:       M({color:0x18181f, roughness:0.3,  metalness:0.8}),
+    chipGray:   M({color:0x2a2a3a, roughness:0.4,  metalness:0.6}),
+    gold:       M({color:0xd4a017, roughness:0.15, metalness:1.0}),
+    copper:     M({color:0xb87333, roughness:0.2,  metalness:0.9}),
+    tin:        M({color:0xaaaaaa, roughness:0.3,  metalness:0.85}),
+    usbMetal:   M({color:0x888899, roughness:0.2,  metalness:0.95}),
+    usbBlack:   M({color:0x111111, roughness:0.6,  metalness:0.1}),
+    neon:       M({color:0x00ffcc, emissive:0x00ffcc, emissiveIntensity:1.2, roughness:0.3}),
+    ledGreen:   M({color:0x00ff44, emissive:0x00ff44, emissiveIntensity:2.0, roughness:0.2, transparent:true, opacity:0.9}),
+    ledOrange:  M({color:0xff8800, emissive:0xff8800, emissiveIntensity:2.0, roughness:0.2, transparent:true, opacity:0.9}),
+    ledYellow:  M({color:0xffee00, emissive:0xffee00, emissiveIntensity:1.8, roughness:0.2, transparent:true, opacity:0.9}),
+    ledRed:     M({color:0xff1111, emissive:0xff1111, emissiveIntensity:2.0, roughness:0.2, transparent:true, opacity:0.9}),
+    ledBlue:    M({color:0x2266ff, emissive:0x2266ff, emissiveIntensity:1.8, roughness:0.2, transparent:true, opacity:0.9}),
+    trace:      M({color:0xd4a017, roughness:0.1,  metalness:1.0, transparent:true, opacity:0.85}),
+    silkscreen: M({color:0xffffff, roughness:0.9,  metalness:0.0, transparent:true, opacity:0.7}),
+    regulator:  M({color:0x222222, roughness:0.5,  metalness:0.5}),
+    crystalSil: M({color:0xddddcc, roughness:0.1,  metalness:0.9}),
+    capBlue:    M({color:0x0033aa, roughness:0.4,  metalness:0.1}),
+    resBody:    M({color:0x8B4513, roughness:0.6,  metalness:0.0}),
+    resBand:    M({color:0xffaa00, roughness:0.5,  metalness:0.0}),
+    connBlack:  M({color:0x1c1c1c, roughness:0.7,  metalness:0.1}),
+    dark:       M({color:0x111122, roughness:0.4,  metalness:0.6}),
+    sensorCyl:  M({color:0xaaaaaa, roughness:0.2,  metalness:0.8}),
+    wireRed:    M({color:0xcc0000, roughness:0.7,  metalness:0.0}),
+    wireBlack:  M({color:0x222222, roughness:0.7,  metalness:0.0}),
+    wireYellow: M({color:0xddcc00, roughness:0.7,  metalness:0.0}),
+    wireBlue:   M({color:0x0044cc, roughness:0.7,  metalness:0.0}),
+    wireGreen:  M({color:0x00aa33, roughness:0.7,  metalness:0.0}),
+    wireWhite:  M({color:0xeeeeee, roughness:0.7,  metalness:0.0}),
+    wirePurple: M({color:0x8800cc, roughness:0.7,  metalness:0.0}),
+    white:      M({color:0xffffff, roughness:0.5,  metalness:0.0}),
+    heatsink:   M({color:0x888888, roughness:0.3,  metalness:0.8}),
+    servoBlue:  M({color:0x2244bb, roughness:0.4,  metalness:0.2}),
+    servoGray:  M({color:0x888888, roughness:0.4,  metalness:0.3}),
+    relayBlue:  M({color:0x1133aa, roughness:0.4,  metalness:0.1}),
+    coil:       M({color:0x553300, roughness:0.6,  metalness:0.2}),
+    screenBlue: M({color:0x000088, emissive:0x0044ff, emissiveIntensity:1.2, roughness:0.1}),
+    rfidBlue:   M({color:0x003366, roughness:0.35, metalness:0.15}),
+    pirPCB:     M({color:0x2a5a1a, roughness:0.4,  metalness:0.1}),
+    orange:     M({color:0xff6b35, emissive:0xff6b35, emissiveIntensity:0.5}),
+  };
+}
+
+// ── ADDER helper ─────────────────────────────────────────────────────────────
+function adder(g) {
+  const fn = (geo, mat, x=0,y=0,z=0,rx=0,ry=0,rz=0) => {
+    const mesh = new THREE.Mesh(geo,mat);
+    mesh.position.set(x,y,z); mesh.rotation.set(rx,ry,rz);
+    mesh.castShadow=true; g.add(mesh); return mesh;
+  };
+  fn._g = g;
+  return fn;
+}
+
+function pinHeaders(add, m, count, x, topY, startZ, step=0.28) {
+  for(let i=0;i<count;i++){
+    const pz=startZ+i*step;
+    add(new THREE.BoxGeometry(0.2,0.28,0.2), m.connBlack, x,topY+0.14,pz);
+    add(new THREE.BoxGeometry(0.08,0.5,0.08), m.gold, x,topY+0.08,pz);
+  }
+}
+
+// ── ROBOT ────────────────────────────────────────────────────────────────────
+function buildRobot(m) {
+  const g = new THREE.Group(); const add = adder(g);
+  add(new THREE.BoxGeometry(4,0.3,3), m.pcb, 0,-1.5,0);
+  add(new THREE.BoxGeometry(2,2,1.5), m.dark, 0,0.2,0);
+  add(new THREE.BoxGeometry(1.4,1,1.2), new THREE.MeshStandardMaterial({color:0x0a1520,roughness:0.3,metalness:0.7}), 0,1.7,0);
+  add(new THREE.CylinderGeometry(0.03,0.03,0.8,8), m.tin, 0,2.6,0);
+  add(new THREE.SphereGeometry(0.08,8,8), m.neon, 0,3.05,0);
+  [-0.35,0.35].forEach(x=>{
+    add(new THREE.CylinderGeometry(0.12,0.12,0.05,16), m.neon, x,1.78,0.63, Math.PI/2,0,0);
+    add(new THREE.CylinderGeometry(0.08,0.08,0.03,16), new THREE.MeshStandardMaterial({color:0xffffff,emissive:0x00ffcc,emissiveIntensity:2}), x,1.78,0.66, Math.PI/2,0,0);
+  });
+  [-1.3,1.3].forEach((x,i)=>{
+    add(new THREE.SphereGeometry(0.2,8,8), m.tin, x,0.6,0);
+    add(new THREE.CylinderGeometry(0.12,0.1,1.2,8), m.chip, x*1.3,-0.1,0, 0,0,(i===0?-1:1)*0.3);
+  });
+  [-0.5,0.5].forEach(x=>{
+    add(new THREE.CylinderGeometry(0.15,0.12,1.2,8), m.chip, x,-1.2,0);
+    add(new THREE.BoxGeometry(0.4,0.15,0.6), m.chipGray, x,-1.9,0.1);
+  });
+  add(new THREE.BoxGeometry(1.2,0.8,0.05), new THREE.MeshStandardMaterial({color:0x001a10,roughness:0.2,metalness:0.5}), 0,0.2,0.78);
+  [m.ledGreen,m.ledOrange,m.ledBlue,m.ledGreen,m.ledOrange,m.ledBlue].forEach((lm,[lx,ly])=>{},{});
+  [[-0.35,0.4],[-0.35,0.1],[-0.35,-0.2],[0.35,0.4],[0.35,0.1],[0.35,-0.2]].forEach(([lx,ly],i)=>{
+    const cols=[m.ledGreen,m.ledOrange,m.ledBlue,m.ledGreen,m.ledOrange,m.ledBlue];
+    add(new THREE.SphereGeometry(0.06,6,6), cols[i], lx,0.2+ly,0.82);
+  });
+  return g;
+}
+
+// ── BOARD ────────────────────────────────────────────────────────────────────
+function buildBoard(board, m) {
+  const g = new THREE.Group();
+  const [bw,bh,bl] = board.size; const s=1.3;
+  const bwS=bw*s, blS=bl*s, top=bh/2;
+  const pcbColor = board.shape==='rpi5' ? 0x7a1010 : board.color;
+  const pcb = new THREE.Mesh(new THREE.BoxGeometry(bwS,bh,blS), new THREE.MeshStandardMaterial({color:pcbColor,roughness:0.35,metalness:0.15}));
+  pcb.castShadow=true; pcb.receiveShadow=true; g.add(pcb);
+  const add = adder(g);
+
+  // Mounting holes
+  [[bwS/2-0.4,blS/2-0.4],[bwS/2-0.4,-blS/2+0.4],[-bwS/2+0.4,blS/2-0.4],[-bwS/2+0.4,-blS/2+0.4]].forEach(([hx,hz])=>{
+    add(new THREE.CylinderGeometry(0.18,0.18,bh+0.01,12), new THREE.MeshStandardMaterial({color:0x000000,roughness:1}), hx,0,hz);
+    add(new THREE.TorusGeometry(0.24,0.04,6,12), m.copper, hx,top+0.01,hz, Math.PI/2,0,0);
+  });
+
+  // Traces
+  add(new THREE.BoxGeometry(bwS*0.7,0.015,0.06), m.trace, 0,top+0.01, blS/2-0.7);
+  add(new THREE.BoxGeometry(bwS*0.5,0.015,0.06), m.trace, 0,top+0.01, -blS/2+0.8);
+  for(let i=-2;i<=2;i++) add(new THREE.BoxGeometry(0.05,0.015,blS*0.4), m.trace, i*(bwS*0.18),top+0.01, 0);
+
+  if(board.shape==='rpi5') {
+    // BCM2712 SoC
+    add(new THREE.BoxGeometry(2.4,0.22,2.4), m.chip, 0,top+0.11, 0.5);
+    add(new THREE.BoxGeometry(1.9,0.04,1.9), m.chipGray, 0,top+0.24, 0.5);
+    // RAM
+    add(new THREE.BoxGeometry(1.5,0.2,1.1), m.chip, 0,top+0.10, -1.3);
+    // USB-C power
+    add(new THREE.BoxGeometry(0.55,0.36,0.5), m.usbMetal, -bwS/2-0.1,top+0.18, -blS/2+0.7);
+    // HDMI micro x2
+    [-1.5,-2.3].forEach(z=>add(new THREE.BoxGeometry(0.7,0.3,0.45), m.usbMetal, -bwS/2-0.05,top+0.15, blS/2+z));
+    // USB 3.0 x2 (blue)
+    [blS/2-0.9,blS/2-2.0].forEach(z=>add(new THREE.BoxGeometry(0.7,0.5,1.1), new THREE.MeshStandardMaterial({color:0x0044ff,roughness:0.3,metalness:0.7}), bwS/2+0.05,top+0.25,z));
+    // USB 2.0 x2
+    [blS/2-3.1,blS/2-4.2].forEach(z=>add(new THREE.BoxGeometry(0.7,0.5,1.1), m.usbBlack, bwS/2+0.05,top+0.25,z));
+    // Ethernet
+    add(new THREE.BoxGeometry(0.7,0.62,1.35), m.sensorCyl, bwS/2+0.05,top+0.31, -blS/2+1.5);
+    // 40-pin GPIO
+    for(let r=0;r<2;r++) for(let c=0;c<20;c++){
+      add(new THREE.BoxGeometry(0.18,0.28,0.18), m.connBlack, -bwS/2+0.4+r*0.28,top+0.14, -blS/2+0.5+c*0.28);
+      add(new THREE.BoxGeometry(0.07,0.5,0.07), m.gold, -bwS/2+0.4+r*0.28,top+0.06, -blS/2+0.5+c*0.28);
+    }
+    // CSI/DSI
+    add(new THREE.BoxGeometry(0.6,0.18,2.2), m.white, 0.5,top+0.09, blS/2-0.5);
+    add(new THREE.BoxGeometry(0.6,0.18,2.2), m.white, -0.5,top+0.09, blS/2-0.5);
+    // LEDs
+    add(new THREE.BoxGeometry(0.12,0.1,0.18), m.ledRed, -bwS/2+1.2,top+0.05,-blS/2+0.35);
+    add(new THREE.BoxGeometry(0.12,0.1,0.18), m.ledGreen,-bwS/2+1.6,top+0.05,-blS/2+0.35);
+    // Fan header
+    add(new THREE.BoxGeometry(0.5,0.22,0.22), m.connBlack, bwS/2-1.5,top+0.11,-blS/2+0.35);
+    // PCIe
+    add(new THREE.BoxGeometry(bwS*0.4,0.18,0.25), m.connBlack, bwS*0.1,top+0.09, blS/2-0.2);
+    // Caps
+    [[-1.0,0.8],[1.0,0.8],[-1.0,-0.5],[0.5,-1.5]].forEach(([cx,cz])=>add(new THREE.CylinderGeometry(0.1,0.1,0.3,12), m.capBlue, cx,top+0.15,cz));
+    g.rotation.set(-0.25,0,0); return g;
+  }
+
+  // MCU chip
+  const chipW=board.shape==='nano'?1.0:1.4, chipD=board.shape==='nano'?1.0:1.4;
+  add(new THREE.BoxGeometry(chipW,0.18,chipD), m.chip, 0,top+0.09,0.6);
+  add(new THREE.BoxGeometry(chipW*0.6,0.02,chipD*0.5), m.chipGray, 0,top+0.19,0.6);
+  const lc=board.shape==='nano'?4:7;
+  for(let i=0;i<lc;i++){
+    const ox=-chipW/2*1.1+i*(chipW*1.1/(lc-1));
+    add(new THREE.BoxGeometry(0.07,0.06,0.25), m.tin, ox,top+0.03,0.6+chipD/2+0.1);
+    add(new THREE.BoxGeometry(0.07,0.06,0.25), m.tin, ox,top+0.03,0.6-chipD/2-0.1);
+  }
+  for(let i=0;i<lc;i++){
+    const oz=0.6-chipD/2*1.1+i*(chipD*1.1/(lc-1));
+    add(new THREE.BoxGeometry(0.25,0.06,0.07), m.tin, chipW/2+0.1,top+0.03,oz);
+    add(new THREE.BoxGeometry(0.25,0.06,0.07), m.tin,-chipW/2-0.1,top+0.03,oz);
+  }
+
+  // USB
+  add(new THREE.BoxGeometry(0.85,0.42,0.55), m.usbMetal, 0,top+0.21,-blS/2-0.05);
+  add(new THREE.BoxGeometry(0.65,0.22,0.50), m.usbBlack, 0,top+0.21,-blS/2+0.0);
+  add(new THREE.BoxGeometry(0.85,0.04,0.56), m.tin,      0,top+0.42,-blS/2-0.05);
+
+  if(board.shape!=='nano'){
+    // Power jack
+    add(new THREE.CylinderGeometry(0.28,0.28,0.6,16), new THREE.MeshStandardMaterial({color:0x333333,roughness:0.5,metalness:0.6}), -bwS/2-0.1,top+0.2,-blS/2+0.6, Math.PI/2,0,0);
+    add(new THREE.CylinderGeometry(0.12,0.12,0.65,12), m.tin, -bwS/2-0.1,top+0.2,-blS/2+0.6, Math.PI/2,0,0);
+    // Voltage reg
+    add(new THREE.BoxGeometry(0.35,0.5,0.2), m.regulator, -bwS/2+0.55,top+0.25,blS/2-0.55);
+    add(new THREE.BoxGeometry(0.5,0.06,0.3), m.tin, -bwS/2+0.55,top+0.03,blS/2-0.55);
+  }
+
+  // Crystal
+  add(new THREE.CylinderGeometry(0.09,0.09,0.42,12), m.crystalSil, bwS/2-0.6,top+0.21,0.2);
+  add(new THREE.BoxGeometry(0.06,0.06,0.06), m.tin, bwS/2-0.5,top+0.03,0.2);
+  add(new THREE.BoxGeometry(0.06,0.06,0.06), m.tin, bwS/2-0.7,top+0.03,0.2);
+
+  // Caps
+  [[0.4,top+0.25,-0.8],[0.8,top+0.25,-0.8],[-0.5,top+0.22,-0.5]].forEach(([cx,cy,cz])=>{
+    add(new THREE.CylinderGeometry(0.12,0.12,0.35,12), m.capBlue, cx,cy,cz);
+    add(new THREE.CylinderGeometry(0.13,0.13,0.04,12), m.tin, cx,top+0.03,cz);
+    add(new THREE.CylinderGeometry(0.125,0.125,0.08,12), new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.8}), cx,cy+0.12,cz);
+  });
+  [[-0.3,0.1],[0.6,0.8],[-0.8,0.5],[0.2,-0.3]].forEach(([cx,cz])=>{
+    add(new THREE.BoxGeometry(0.18,0.1,0.12), new THREE.MeshStandardMaterial({color:0xd4aa60,roughness:0.5,metalness:0.3}), cx,top+0.05,cz);
+    add(new THREE.BoxGeometry(0.06,0.08,0.12), m.tin, cx-0.1,top+0.04,cz);
+    add(new THREE.BoxGeometry(0.06,0.08,0.12), m.tin, cx+0.1,top+0.04,cz);
+  });
+
+  // Resistors
+  [[-0.6,-0.3],[0.9,-0.2],[-0.9,0.4]].forEach(([rx,rz])=>{
+    add(new THREE.CylinderGeometry(0.06,0.06,0.35,8), m.resBody, rx,top+0.09,rz, 0,0,Math.PI/2);
+    add(new THREE.CylinderGeometry(0.065,0.065,0.07,8), m.resBand, rx-0.06,top+0.09,rz, 0,0,Math.PI/2);
+    add(new THREE.CylinderGeometry(0.065,0.065,0.07,8), m.resBand, rx+0.06,top+0.09,rz, 0,0,Math.PI/2);
+  });
+
+  // LEDs
+  [[m.ledGreen,bwS/2-0.35],[m.ledOrange,bwS/2-0.75],[m.ledYellow,bwS/2-1.15]].forEach(([lmat,lx])=>{
+    add(new THREE.BoxGeometry(0.14,0.1,0.18), lmat, lx,top+0.05,-0.4);
+    add(new THREE.BoxGeometry(0.04,0.04,0.04), m.tin, lx-0.05,top+0.02,-0.4);
+    add(new THREE.BoxGeometry(0.04,0.04,0.04), m.tin, lx+0.05,top+0.02,-0.4);
+  });
+
+  // Reset button
+  add(new THREE.BoxGeometry(0.3,0.12,0.3), m.connBlack, bwS/2-0.38,top+0.06,blS/2-0.45);
+  add(new THREE.CylinderGeometry(0.09,0.09,0.06,12), new THREE.MeshStandardMaterial({color:0xff2222,roughness:0.5}), bwS/2-0.38,top+0.12,blS/2-0.45);
+
+  // Pin headers
+  const nPins=Math.round(blS/0.28);
+  pinHeaders(add,m,nPins, bwS/2-0.12, top, -blS/2+0.2);
+  pinHeaders(add,m,nPins,-bwS/2+0.12, top, -blS/2+0.2);
+
+  // ICSP
+  if(board.shape!=='nano'){
+    for(let r=0;r<2;r++) for(let c=0;c<3;c++){
+      add(new THREE.BoxGeometry(0.18,0.26,0.18), m.connBlack, bwS/2-0.6+c*0.3,top+0.13,blS/2-1.0+r*0.3);
+      add(new THREE.BoxGeometry(0.07,0.45,0.07), m.gold, bwS/2-0.6+c*0.3,top+0.06,blS/2-1.0+r*0.3);
+    }
+  }
+
+  g.rotation.set(-0.25,0,0); return g;
+}
+
+// ── SENSOR BUILDERS ──────────────────────────────────────────────────────────
+function buildSensor(sensor, m) {
+  switch(sensor.type) {
+    case "hcsr04":    return buildHCSR04(sensor,m);
+    case "dht22":     return buildDHT(sensor,m,0x1a1a1a);
+    case "dht11":     return buildDHT(sensor,m,0x1a6a2a);
+    case "pir":       return buildPIR(m);
+    case "bmp280":    return buildBMP280(m);
+    case "mpu6050":   return buildMPU6050(m);
+    case "oled":      return buildOLED(m);
+    case "servo":     return buildServo(m);
+    case "ldr":       return buildLDR(m);
+    case "soilmoist": return buildSoilMoisture(m);
+    case "ir":        return buildIRSensor(m);
+    case "relay":     return buildRelay(m);
+    case "mq2":       return buildMQ2(m);
+    case "ds18b20":   return buildDS18B20(m);
+    case "rfid":      return buildRFID(m);
+    case "l298n":     return buildL298N(m);
+    case "neopixel":  return buildNeopixel(m);
+    default:          return buildHCSR04(sensor,m);
+  }
+}
+
+function buildHCSR04(sensor,m){
+  const g=new THREE.Group(); const add=adder(g);
+  const pcbM=new THREE.MeshStandardMaterial({color:sensor.color||0x1a3a6e,roughness:0.35,metalness:0.15});
+  add(new THREE.BoxGeometry(4.5,0.15,2.0),pcbM,0,0,0);
+  [-1.2,1.2].forEach(x=>{
+    add(new THREE.CylinderGeometry(0.52,0.52,0.9,24),m.sensorCyl,x,0.5,0);
+    add(new THREE.CylinderGeometry(0.38,0.38,0.92,24),new THREE.MeshStandardMaterial({color:0x222222,roughness:0.8}),x,0.5,0);
+    add(new THREE.TorusGeometry(0.52,0.06,8,24),m.sensorCyl,x,0.95,0,Math.PI/2,0,0);
+  });
+  add(new THREE.BoxGeometry(0.9,0.12,0.7),m.chip,0.4,0.14,0.2);
+  for(let i=0;i<4;i++) add(new THREE.BoxGeometry(0.12,0.5,0.12),m.tin,-0.6+i*0.4,0.25,-0.85);
+  add(new THREE.BoxGeometry(4.2,0.02,0.35),m.silkscreen,0,0.085,-0.6);
+  return g;
+}
+
+function buildDHT(sensor,m,col){
+  const g=new THREE.Group(); const add=adder(g);
+  const body=new THREE.MeshStandardMaterial({color:col,roughness:0.5,metalness:0.1});
+  add(new THREE.BoxGeometry(1.8,1.5,1.0),body,0,0.75,0);
+  for(let r=0;r<4;r++) for(let c=0;c<3;c++)
+    add(new THREE.BoxGeometry(0.25,0.22,0.05),new THREE.MeshStandardMaterial({color:0x444444,roughness:0.8}),-0.35+c*0.35,0.2+r*0.32,0.53);
+  for(let i=0;i<4;i++) add(new THREE.BoxGeometry(0.08,0.6,0.08),m.tin,-0.4+i*0.28,-0.3,0);
+  add(new THREE.SphereGeometry(0.07,8,8),m.ledGreen,0.7,1.3,0.53);
+  return g;
+}
+
+function buildPIR(m){
+  const g=new THREE.Group(); const add=adder(g);
+  add(new THREE.BoxGeometry(3.2,0.15,3.2),m.pirPCB,0,0,0);
+  add(new THREE.SphereGeometry(0.9,24,24,0,Math.PI*2,0,Math.PI/2),new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.1,transparent:true,opacity:0.7}),0,0.15,0);
+  add(new THREE.CylinderGeometry(0.18,0.18,0.25,12),new THREE.MeshStandardMaterial({color:0x1a88ff}), -0.9,0.2,1.1);
+  add(new THREE.CylinderGeometry(0.18,0.18,0.25,12),new THREE.MeshStandardMaterial({color:0x1a88ff}),  0.9,0.2,1.1);
+  for(let i=0;i<3;i++) add(new THREE.BoxGeometry(0.1,0.55,0.1),m.tin,-0.2+i*0.2,-0.28,1.5);
+  return g;
+}
+
+function buildBMP280(m){
+  const g=new THREE.Group(); const add=adder(g);
+  add(new THREE.BoxGeometry(1.8,0.12,1.8),m.chip,0,0,0);
+  add(new THREE.BoxGeometry(0.7,0.12,0.7),new THREE.MeshStandardMaterial({color:0x555555,roughness:0.2,metalness:0.8}),0,0.12,0);
+  for(let i=0;i<4;i++){const a=i*Math.PI/2; add(new THREE.BoxGeometry(0.18,0.06,0.12),m.tin,Math.cos(a)*0.85,0.09,Math.sin(a)*0.85,0,a,0);}
+  add(new THREE.BoxGeometry(1.6,0.02,0.4),m.silkscreen,0,0.07,-0.5);
+  for(let i=0;i<4;i++) add(new THREE.BoxGeometry(0.1,0.42,0.1),m.tin,-0.45+i*0.3,-0.21,-0.85);
+  return g;
+}
+
+function buildMPU6050(m){
+  const g=new THREE.Group(); const add=adder(g);
+  add(new THREE.BoxGeometry(2.1,0.12,1.6),m.chip,0,0,0);
+  add(new THREE.BoxGeometry(0.85,0.14,0.85),new THREE.MeshStandardMaterial({color:0x444444,roughness:0.2,metalness:0.8}),0,0.13,0.1);
+  add(new THREE.BoxGeometry(1.9,0.02,0.5),m.silkscreen,0,0.07,-0.5);
+  for(let i=0;i<8;i++) add(new THREE.BoxGeometry(0.1,0.5,0.1),m.tin,-1.1+i*0.3,-0.25,-0.75);
+  return g;
+}
+
+function buildOLED(m){
+  const g=new THREE.Group(); const add=adder(g);
+  add(new THREE.BoxGeometry(3.5,0.12,3.5),new THREE.MeshStandardMaterial({color:0x0a0a0a,roughness:0.4,metalness:0.1}),0,0,0);
+  add(new THREE.BoxGeometry(2.8,0.05,2.1),m.screenBlue,0,0.09,0.2);
+  for(let r=0;r<6;r++) add(new THREE.BoxGeometry(2.4,0.03,0.08),new THREE.MeshStandardMaterial({color:0x88ccff,emissive:0x88ccff,emissiveIntensity:0.8,roughness:0.1}),0,0.12,0.7-r*0.28);
+  for(let i=0;i<4;i++) add(new THREE.BoxGeometry(0.1,0.5,0.1),m.tin,-0.45+i*0.3,-0.25,-1.65);
+  return g;
+}
+
+function buildServo(m){
+  const g=new THREE.Group(); const add=adder(g);
+  add(new THREE.BoxGeometry(2.3,2.2,1.15),m.servoBlue,0,1.0,0);
+  [-1.3,1.3].forEach(x=>add(new THREE.BoxGeometry(0.25,0.35,1.3),m.servoGray,x,1.9,0));
+  add(new THREE.CylinderGeometry(0.22,0.22,0.3,16),m.sensorCyl,0,2.2,0.3);
+  add(new THREE.BoxGeometry(1.4,0.12,0.22),m.sensorCyl,0,2.38,0.3);
+  [-1.3,1.3].forEach(x=>add(new THREE.CylinderGeometry(0.08,0.08,0.36,8),new THREE.MeshStandardMaterial({color:0x555555}),x,1.9,0.68,Math.PI/2,0,0));
+  [m.wireRed,m.wireBlack,m.wireYellow].forEach((wm,i)=>add(new THREE.CylinderGeometry(0.07,0.07,1.2,6),wm,-0.2+i*0.2,-0.2,0));
+  return g;
+}
+
+function buildLDR(m){
+  const g=new THREE.Group(); const add=adder(g);
+  add(new THREE.CylinderGeometry(0.5,0.5,0.12,20),new THREE.MeshStandardMaterial({color:0xdddddd,roughness:0.3,metalness:0.1}),0,0.06,0);
+  add(new THREE.CylinderGeometry(0.35,0.35,0.08,20,1,true),new THREE.MeshStandardMaterial({color:0x884400,roughness:0.2,metalness:0.5}),0,0.1,0);
+  add(new THREE.BoxGeometry(0.06,0.9,0.06),m.tin,-0.15,-0.45,0);
+  add(new THREE.BoxGeometry(0.06,0.9,0.06),m.tin, 0.15,-0.45,0);
+  add(new THREE.BoxGeometry(1.6,0.1,1.6),new THREE.MeshStandardMaterial({color:0x1a5e2a,roughness:0.4,metalness:0.1}),0,-0.9,0);
+  return g;
+}
+
+function buildSoilMoisture(m){
+  const g=new THREE.Group(); const add=adder(g);
+  add(new THREE.BoxGeometry(2.0,0.12,3.5),new THREE.MeshStandardMaterial({color:0x2a5a1a,roughness:0.35,metalness:0.1}),0,0,0);
+  [-0.4,0.4].forEach(x=>add(new THREE.BoxGeometry(0.18,0.08,3.0),new THREE.MeshStandardMaterial({color:0xb87333,roughness:0.2,metalness:0.9}),x,0.1,0.5));
+  add(new THREE.BoxGeometry(0.65,0.18,0.65),m.chip,0,0.15,-0.8);
+  add(new THREE.CylinderGeometry(0.13,0.13,0.28,12),new THREE.MeshStandardMaterial({color:0x0022aa,roughness:0.3}),-0.6,0.2,-1.3);
+  for(let i=0;i<4;i++) add(new THREE.BoxGeometry(0.1,0.4,0.1),m.tin,-0.45+i*0.3,-0.2,-1.65);
+  return g;
+}
+
+function buildIRSensor(m){
+  const g=new THREE.Group(); const add=adder(g);
+  add(new THREE.BoxGeometry(3.0,0.12,1.4),new THREE.MeshStandardMaterial({color:0x1a1a1a,roughness:0.4,metalness:0.1}),0,0,0);
+  add(new THREE.CylinderGeometry(0.16,0.16,0.4,12),new THREE.MeshStandardMaterial({color:0x111111,roughness:0.2,metalness:0.1,transparent:true,opacity:0.85}),-0.7,0.26,0);
+  add(new THREE.CylinderGeometry(0.16,0.16,0.4,12),new THREE.MeshStandardMaterial({color:0x2244bb,roughness:0.1,metalness:0.1,transparent:true,opacity:0.7,emissive:0x0011ff,emissiveIntensity:0.5}),0.7,0.26,0);
+  add(new THREE.CylinderGeometry(0.14,0.14,0.22,12),new THREE.MeshStandardMaterial({color:0x1a88ff}),0,0.17,0.4);
+  add(new THREE.BoxGeometry(0.12,0.1,0.16),m.ledGreen, 1.1,0.11, 0.4);
+  add(new THREE.BoxGeometry(0.12,0.1,0.16),m.ledRed,   1.1,0.11, 0.0);
+  for(let i=0;i<3;i++) add(new THREE.BoxGeometry(0.1,0.45,0.1),m.tin,-0.2+i*0.2,-0.22,-0.65);
+  return g;
+}
+
+function buildRelay(m){
+  const g=new THREE.Group(); const add=adder(g);
+  add(new THREE.BoxGeometry(4.0,0.15,5.0),m.relayBlue,0,0,0);
+  add(new THREE.BoxGeometry(1.8,1.2,2.0),new THREE.MeshStandardMaterial({color:0x111111,roughness:0.5,metalness:0.3}),0,0.68,0.3);
+  add(new THREE.BoxGeometry(1.4,0.1,1.6),m.coil,0,1.33,0.3);
+  [-0.55,0,0.55].forEach(x=>add(new THREE.CylinderGeometry(0.22,0.22,0.5,12),m.sensorCyl,x,0.4,-1.9));
+  add(new THREE.BoxGeometry(0.5,0.15,0.5),m.chip,-1.2,0.15,1.5);
+  for(let i=0;i<3;i++) add(new THREE.BoxGeometry(0.1,0.4,0.1),m.tin,-0.2+i*0.2,-0.2,2.4);
+  add(new THREE.BoxGeometry(0.12,0.1,0.16),m.ledGreen,1.5,0.13,1.5);
+  return g;
+}
+
+function buildMQ2(m){
+  const g=new THREE.Group(); const add=adder(g);
+  add(new THREE.BoxGeometry(3.2,0.15,3.2),new THREE.MeshStandardMaterial({color:0x222222,roughness:0.4,metalness:0.1}),0,0,0);
+  add(new THREE.CylinderGeometry(0.7,0.7,0.9,24),m.sensorCyl,0,0.53,0);
+  add(new THREE.CylinderGeometry(0.65,0.65,0.85,24,1,true),new THREE.MeshStandardMaterial({color:0x888888,roughness:0.3,metalness:0.7,wireframe:true}),0,0.53,0);
+  for(let i=0;i<6;i++){const a=i*Math.PI/3; add(new THREE.BoxGeometry(0.08,0.55,0.08),m.tin,Math.cos(a)*0.65,0.0,Math.sin(a)*0.65);}
+  add(new THREE.CylinderGeometry(0.18,0.18,0.25,12),new THREE.MeshStandardMaterial({color:0x1a88ff}),1.0,0.2,1.0);
+  add(new THREE.BoxGeometry(0.12,0.1,0.16),m.ledGreen,1.2,0.13,0.4);
+  add(new THREE.BoxGeometry(0.12,0.1,0.16),m.ledRed,  1.2,0.13,0.0);
+  for(let i=0;i<4;i++) add(new THREE.BoxGeometry(0.1,0.4,0.1),m.tin,-0.45+i*0.3,-0.2,-1.55);
+  return g;
+}
+
+function buildDS18B20(m){
+  const g=new THREE.Group(); const add=adder(g);
+  add(new THREE.CylinderGeometry(0.22,0.22,1.2,16,1,false,0,Math.PI),new THREE.MeshStandardMaterial({color:0x111111,roughness:0.5}),0,0.6,0);
+  add(new THREE.BoxGeometry(0.44,1.2,0.28),new THREE.MeshStandardMaterial({color:0x111111,roughness:0.5}),0,0.6,0.11);
+  for(let i=0;i<3;i++) add(new THREE.BoxGeometry(0.06,1.0,0.06),m.tin,-0.1+i*0.1,-0.5,0);
+  add(new THREE.CylinderGeometry(0.08,0.08,2.5,8),m.wireBlack,0,2.45,0);
+  add(new THREE.CylinderGeometry(0.06,0.06,2.5,8),m.wireRed,   0.1,2.45,0);
+  add(new THREE.CylinderGeometry(0.06,0.06,2.5,8),m.wireYellow,-0.1,2.45,0);
+  return g;
+}
+
+function buildRFID(m){
+  const g=new THREE.Group(); const add=adder(g);
+  add(new THREE.BoxGeometry(4.8,0.12,6.0),m.rfidBlue,0,0,0);
+  add(new THREE.TorusGeometry(1.6,0.06,6,4),new THREE.MeshStandardMaterial({color:0xd4a017,roughness:0.1,metalness:1.0}),0,0.1,0,0,0,Math.PI/4);
+  add(new THREE.TorusGeometry(1.2,0.05,6,4),m.trace,0,0.1,0,0,0,Math.PI/4);
+  add(new THREE.BoxGeometry(1.2,0.2,1.2),m.chip,0.5,0.16,-0.5);
+  add(new THREE.CylinderGeometry(0.07,0.07,0.38,10),m.crystalSil,-1.0,0.2,-0.5);
+  for(let i=0;i<7;i++){
+    add(new THREE.BoxGeometry(0.18,0.26,0.18),m.connBlack,-2.1,0.13,-2.0+i*0.5);
+    add(new THREE.BoxGeometry(0.07,0.45,0.07),m.gold,-2.1,0.06,-2.0+i*0.5);
+  }
+  return g;
+}
+
+function buildL298N(m){
+  const g=new THREE.Group(); const add=adder(g);
+  add(new THREE.BoxGeometry(4.5,0.15,4.5),new THREE.MeshStandardMaterial({color:0x222222,roughness:0.4,metalness:0.1}),0,0,0);
+  add(new THREE.BoxGeometry(1.5,1.0,1.5),m.chip,0,0.58,0);
+  add(new THREE.BoxGeometry(2.0,0.8,0.25),m.heatsink,0,0.7,-0.9);
+  for(let i=0;i<6;i++) add(new THREE.BoxGeometry(0.08,0.7,0.25),m.heatsink,-0.5+i*0.2,0.7,-0.9);
+  [[-1.5,-1.8],[-0.5,-1.8],[0.5,-1.8],[1.5,-1.8],[-1.5,1.8],[1.5,1.8]].forEach(([x,z])=>add(new THREE.CylinderGeometry(0.2,0.2,0.45,12),m.sensorCyl,x,0.28,z));
+  for(let i=0;i<6;i++) add(new THREE.BoxGeometry(0.1,0.4,0.1),m.tin,-0.75+i*0.3,-0.2,2.1);
+  add(new THREE.BoxGeometry(0.3,0.5,0.18),m.regulator,1.5,0.32,0.8);
+  add(new THREE.BoxGeometry(0.12,0.1,0.16),m.ledGreen,1.5,0.13,-0.4);
+  return g;
+}
+
+function buildNeopixel(m){
+  const g=new THREE.Group(); const add=adder(g);
+  const ringColors=[0xff0000,0xff6600,0xffff00,0x00ff00,0x00ffcc,0x0088ff,0xff00ff,0xff0066,0xff0000,0xff6600,0xffff00,0x00ff00];
+  for(let i=0;i<12;i++){
+    const a=(i/12)*Math.PI*2;
+    const ledM=new THREE.MeshStandardMaterial({color:ringColors[i],emissive:ringColors[i],emissiveIntensity:1.5,roughness:0.2,transparent:true,opacity:0.9});
+    add(new THREE.BoxGeometry(0.35,0.1,0.35),ledM,Math.cos(a)*1.8,0.1,Math.sin(a)*1.8);
+  }
+  add(new THREE.TorusGeometry(1.8,0.4,8,48),new THREE.MeshStandardMaterial({color:0x111111,roughness:0.5,metalness:0.1}),0,0,0,Math.PI/2,0,0);
+  add(new THREE.CylinderGeometry(1.35,1.35,0.12,32,1,false),new THREE.MeshStandardMaterial({color:0x111111,roughness:0.8}),0,0,0);
+  for(let i=0;i<3;i++) add(new THREE.BoxGeometry(0.1,0.45,0.1),m.tin,-0.2+i*0.2,-0.22,-2.0);
+  return g;
+}
+
+// ── MAIN COMPONENT ────────────────────────────────────────────────────────────
+export default function BootUp() {
+  const canvasRef  = useRef(null);
+  const sceneRef   = useRef({});
+  const [input, setInput]           = useState("");
+  const [boardInfo, setBoardInfo]   = useState({ title:"BOOT-UP SYSTEM", specs:"Type a board (Arduino Uno, RPi 5…) or sensor (HC-SR04, DHT22, PIR, MPU6050, OLED…)" });
+  const [messages, setMessages]     = useState([
+    { role:"agent", text:"Hello! I'm **BOOT-UP**, your AI engineering assistant.\n\nType any **board** or **sensor** in the LOAD box on the left to see its 3D model.\n\n**Boards:** Arduino Uno · Mega · Nano · ESP32 · ESP8266 · Raspberry Pi 5 · Raspberry Pi Pico · STM32\n\n**Sensors:** HC-SR04 · DHT22 · DHT11 · PIR · BMP280 · MPU6050 · OLED · Servo · LDR · Soil Moisture · IR Sensor · Relay · MQ-2 · DS18B20 · RFID · L298N · NeoPixel" }
+  ]);
+  const [inputText, setInputText]   = useState("");
+  const [loading, setLoading]       = useState(false);
+  const historyRef = useRef([]);
+  const chatRef    = useRef(null);
+  const [clock, setClock]           = useState("");
+
+  useEffect(()=>{
+    const t=setInterval(()=>setClock(new Date().toLocaleTimeString('en-US',{hour12:false})),1000);
+    return ()=>clearInterval(t);
+  },[]);
+
+  useEffect(()=>{
+    if(chatRef.current) chatRef.current.scrollTop=chatRef.current.scrollHeight;
+  },[messages,loading]);
+
+  useEffect(()=>{
+    const canvas=canvasRef.current; if(!canvas) return;
+    const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.shadowMap.enabled=true;
+    const scene=new THREE.Scene();
+    const camera=new THREE.PerspectiveCamera(45,1,0.1,100);
+    camera.position.set(0,3,12); camera.lookAt(0,0,0);
+
+    scene.add(new THREE.AmbientLight(0x334455,0.6));
+    const neonL=new THREE.PointLight(0x00ffcc,2.5,20);
+    neonL.position.set(3,4,3); neonL.castShadow=true; scene.add(neonL);
+    const rimL=new THREE.PointLight(0xff6b35,1.2,15);
+    rimL.position.set(-3,2,-2); scene.add(rimL);
+    const topL=new THREE.DirectionalLight(0xffffff,1.2);
+    topL.position.set(2,10,4); topL.castShadow=true; scene.add(topL);
+    const fillL=new THREE.DirectionalLight(0x8888ff,0.4);
+    fillL.position.set(-4,3,-3); scene.add(fillL);
+
+    const grid=new THREE.GridHelper(20,20,0x001a10,0x001a10);
+    grid.position.set(0,-2.5,0); scene.add(grid);
+
+    const mats=buildMats();
+    let current=buildRobot(mats); scene.add(current);
+    let autoRot=true,isDrag=false,prevX=0,prevY=0,rotX=0,rotY=0,t=0;
+
+    const onDown=e=>{isDrag=true;prevX=e.clientX||e.touches?.[0]?.clientX||0;prevY=e.clientY||e.touches?.[0]?.clientY||0;autoRot=false;};
+    const onUp=()=>isDrag=false;
+    const onMove=e=>{
+      if(!isDrag) return;
+      const cx=e.clientX||e.touches?.[0]?.clientX||0,cy=e.clientY||e.touches?.[0]?.clientY||0;
+      rotY+=(cx-prevX)*0.01; rotX+=(cy-prevY)*0.01;
+      rotX=Math.max(-Math.PI/3,Math.min(Math.PI/3,rotX));
+      if(current){current.rotation.y=rotY;current.rotation.x=rotX;}
+      prevX=cx;prevY=cy;
+    };
+    canvas.addEventListener('mousedown',onDown);
+    canvas.addEventListener('touchstart',onDown);
+    window.addEventListener('mouseup',onUp);
+    window.addEventListener('touchend',onUp);
+    window.addEventListener('mousemove',onMove);
+    window.addEventListener('touchmove',onMove);
+
+    const resize=()=>{
+      const p=canvas.parentElement; if(!p) return;
+      renderer.setSize(p.clientWidth,p.clientHeight,false);
+      camera.aspect=p.clientWidth/p.clientHeight; camera.updateProjectionMatrix();
+    };
+    resize(); window.addEventListener('resize',resize);
+
+    let raf;
+    const animate=()=>{
+      raf=requestAnimationFrame(animate); t+=0.016;
+      if(current&&autoRot) current.rotation.y=t*0.35;
+      neonL.position.set(Math.sin(t*0.5)*4,4,Math.cos(t*0.5)*4);
+      renderer.render(scene,camera);
+    };
+    animate();
+
+    sceneRef.current={
+      mats,
+      load:(obj3d)=>{
+        scene.remove(current);
+        current.traverse(o=>{if(o.geometry)o.geometry.dispose();});
+        current=obj3d; scene.add(current);
+        autoRot=true; rotX=0; rotY=0;
+      }
+    };
+
+    return ()=>{
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize',resize);
+      window.removeEventListener('mouseup',onUp);
+      window.removeEventListener('touchend',onUp);
+      window.removeEventListener('mousemove',onMove);
+      renderer.dispose();
+    };
+  },[]);
+
+  const loadObject=useCallback(()=>{
+    const q=input.trim(); if(!q) return;
+    const board=matchBoard(q);
+    const sensor=matchSensor(q);
+    if(board){
+      sceneRef.current.load(buildBoard(board,sceneRef.current.mats));
+      setBoardInfo({title:board.title,specs:board.specs});
+      setMessages(prev=>[...prev,{role:"agent",text:`🔩 Loaded **${board.title}**!\n\n${board.specs}\n\nDrag to rotate. Type a sensor name to load a sensor!`}]);
+    } else if(sensor){
+      sceneRef.current.load(buildSensor(sensor,sceneRef.current.mats));
+      setBoardInfo({title:sensor.title,specs:sensor.specs});
+      setMessages(prev=>[...prev,{role:"agent",text:`📡 Loaded **${sensor.title}**!\n\n${sensor.specs}\n\n**Pins:** ${sensor.pins} · Drag to inspect!`}]);
+    } else {
+      setMessages(prev=>[...prev,{role:"agent",text:`⚠️ "${q}" not found.\n\n**Boards:** Arduino Uno, Mega, Nano, Due, ESP32, ESP8266, Raspberry Pi 5, Pico, STM32\n\n**Sensors:** HC-SR04, DHT22, DHT11, PIR, BMP280, MPU6050, OLED, Servo, LDR, Soil Moisture, IR Sensor, Relay, MQ-2, DS18B20, RFID, L298N, NeoPixel`}]);
+    }
+  },[input]);
+
+  const sendMessage=useCallback(async()=>{
+    const text=inputText.trim(); if(!text||loading) return;
+    setInputText("");
+    setMessages(prev=>[...prev,{role:"user",text}]);
+    historyRef.current=[...historyRef.current,{role:"user",content:text}];
+    setLoading(true);
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:SYSTEM_PROMPT,messages:historyRef.current})
+      });
+      const data=await res.json();
+      const reply=data.content?.[0]?.text||"No response.";
+      historyRef.current=[...historyRef.current,{role:"assistant",content:reply}];
+      setMessages(prev=>[...prev,{role:"agent",text:reply}]);
+    } catch(err){
+      setMessages(prev=>[...prev,{role:"agent",text:`⚠️ Error: ${err.message}`}]);
+    } finally{setLoading(false);}
+  },[inputText,loading]);
+
+  const fmt=text=>text.split('\n').map((line,i)=>{
+    const html=line
+      .replace(/\*\*(.*?)\*\*/g,'<strong style="color:#00ffcc">$1</strong>')
+      .replace(/`(.*?)`/g,'<code style="background:rgba(0,255,204,0.12);padding:1px 6px;font-family:monospace;font-size:11px;color:#00ffcc;border-radius:2px">$1</code>');
+    return <span key={i} dangerouslySetInnerHTML={{__html:html}}/>;
+  }).reduce((acc,el,i)=>i===0?[el]:[...acc,<br key={`b${i}`}/>,el],[]);
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",height:"100vh",background:"#050810",fontFamily:"'Courier New',monospace",color:"#c8e6ff",overflow:"hidden"}}>
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 20px",borderBottom:"1px solid rgba(0,255,204,0.2)",background:"rgba(0,255,204,0.02)",flexShrink:0}}>
+        <div style={{fontFamily:"Georgia,serif",fontSize:20,fontWeight:900,color:"#00ffcc",letterSpacing:4,textShadow:"0 0 20px rgba(0,255,204,0.4)"}}>
+          BOOT<span style={{color:"#ff6b35"}}>-UP</span>
+          <span style={{fontSize:11,color:"rgba(0,255,204,0.4)",letterSpacing:1,marginLeft:10}}> / AI ENGINEERING AGENT</span>
+        </div>
+        <div style={{display:"flex",gap:20,fontSize:11,color:"rgba(0,255,204,0.6)"}}>
+          <span><span style={{display:"inline-block",width:6,height:6,borderRadius:"50%",background:"#00ffcc",marginRight:5,animation:"pulse 2s infinite"}}/>ONLINE</span>
+          <span>MODEL: claude-sonnet</span>
+          <span>{clock}</span>
+        </div>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",flex:1,minHeight:0,overflow:"hidden"}}>
+        {/* LEFT 3D */}
+        <div style={{display:"flex",flexDirection:"column",borderRight:"1px solid rgba(0,255,204,0.2)",minHeight:0,overflow:"hidden",position:"relative",background:"radial-gradient(ellipse at 30% 20%,rgba(0,100,80,0.08) 0%,transparent 60%)"}}>
+          <div style={{fontFamily:"monospace",fontSize:10,color:"#00ffcc",padding:"7px 14px",borderBottom:"1px solid rgba(0,255,204,0.2)",background:"rgba(0,255,204,0.02)",flexShrink:0,letterSpacing:3}}>
+            // HARDWARE SIMULATION ENGINE
+          </div>
+          <div style={{flex:1,position:"relative",overflow:"hidden",minHeight:0}}>
+            <div style={{position:"absolute",inset:0,backgroundImage:"linear-gradient(rgba(0,255,204,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,255,204,0.03) 1px,transparent 1px)",backgroundSize:"40px 40px",pointerEvents:"none",zIndex:0}}/>
+            <canvas ref={canvasRef} style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",cursor:"grab"}}/>
+            {[{top:8,left:8,borderWidth:"2px 0 0 2px"},{top:8,right:8,borderWidth:"2px 2px 0 0"},{bottom:8,left:8,borderWidth:"0 0 2px 2px"},{bottom:8,right:8,borderWidth:"0 2px 2px 0"}].map((s,i)=>(
+              <div key={i} style={{position:"absolute",width:20,height:20,borderColor:"#00ffcc",borderStyle:"solid",opacity:0.4,...s,pointerEvents:"none",zIndex:5}}/>
+            ))}
+            <div style={{position:"absolute",bottom:0,left:0,right:0,padding:"10px 14px",background:"linear-gradient(transparent,rgba(5,8,16,0.95))",fontFamily:"monospace",fontSize:11,color:"rgba(0,255,204,0.7)",pointerEvents:"none",zIndex:10}}>
+              <div style={{fontFamily:"Georgia,serif",fontSize:15,color:"#00ffcc",textShadow:"0 0 15px rgba(0,255,204,0.4)",marginBottom:3}}>{boardInfo.title}</div>
+              <div style={{opacity:0.7,lineHeight:1.6}}>{boardInfo.specs}</div>
+            </div>
+          </div>
+          <div style={{flexShrink:0,padding:"12px 14px",borderTop:"1px solid rgba(0,255,204,0.2)",background:"rgba(0,10,20,0.85)",display:"flex",gap:8,alignItems:"center"}}>
+            <span style={{fontFamily:"monospace",fontSize:10,color:"#00ffcc",whiteSpace:"nowrap"}}>LOAD ›</span>
+            <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&loadObject()}
+              placeholder="Arduino Uno, RPi 5, DHT22, MPU6050, Relay, RFID..."
+              style={{flex:1,background:"rgba(0,255,204,0.05)",border:"1px solid rgba(0,255,204,0.2)",color:"#00ffcc",fontFamily:"monospace",fontSize:12,padding:"7px 10px",outline:"none",borderRadius:2}}
+            />
+            <button onClick={loadObject}
+              style={{background:"transparent",border:"1px solid #00ffcc",color:"#00ffcc",fontFamily:"monospace",fontSize:10,padding:"7px 14px",cursor:"pointer",letterSpacing:2,transition:"all 0.2s"}}
+              onMouseEnter={e=>{e.target.style.background="#00ffcc";e.target.style.color="#050810";}}
+              onMouseLeave={e=>{e.target.style.background="transparent";e.target.style.color="#00ffcc";}}
+            >SIM</button>
+          </div>
+        </div>
+
+        {/* RIGHT Chat */}
+        <div style={{display:"flex",flexDirection:"column",minHeight:0,overflow:"hidden",background:"radial-gradient(ellipse at 70% 80%,rgba(255,107,53,0.05) 0%,transparent 60%)"}}>
+          <div style={{fontFamily:"monospace",fontSize:10,color:"#00ffcc",padding:"7px 14px",borderBottom:"1px solid rgba(0,255,204,0.2)",background:"rgba(0,255,204,0.02)",flexShrink:0,letterSpacing:3}}>
+            // AI AGENT — ENGINEERING ASSISTANT
+          </div>
+          <div ref={chatRef} style={{flex:1,overflowY:"scroll",padding:"14px",display:"flex",flexDirection:"column",gap:12,minHeight:0,scrollBehavior:"smooth"}}>
+            {messages.map((msg,i)=>(
+              <div key={i} style={{maxWidth:"88%",padding:"11px 14px",borderRadius:2,fontSize:14,lineHeight:1.6,
+                alignSelf:msg.role==="user"?"flex-end":"flex-start",
+                background:msg.role==="user"?"rgba(255,107,53,0.08)":"rgba(0,255,204,0.05)",
+                border:msg.role==="user"?"1px solid rgba(255,107,53,0.2)":"1px solid rgba(0,255,204,0.15)",
+                borderLeft:msg.role==="agent"?"3px solid #00ffcc":undefined,
+                borderRight:msg.role==="user"?"3px solid #ff6b35":undefined,
+                animation:"fadeIn 0.3s ease"}}>
+                <div style={{fontFamily:"monospace",fontSize:10,marginBottom:5,color:msg.role==="user"?"#ff6b35":"#00ffcc",display:"flex",justifyContent:msg.role==="user"?"flex-end":"flex-start",gap:5}}>
+                  {msg.role==="agent"&&<span style={{display:"inline-block",width:6,height:6,borderRadius:"50%",background:"#00ffcc",marginTop:2}}/>}
+                  {msg.role==="agent"?"BOOT-UP AGENT":"YOU"}
+                </div>
+                <div>{fmt(msg.text)}</div>
+              </div>
+            ))}
+            {loading&&(
+              <div style={{alignSelf:"flex-start",maxWidth:"88%",padding:"11px 14px",background:"rgba(0,255,204,0.04)",border:"1px solid rgba(0,255,204,0.15)",borderLeft:"3px solid #00ffcc",borderRadius:2}}>
+                <div style={{fontFamily:"monospace",fontSize:10,color:"#00ffcc",marginBottom:8}}>
+                  <span style={{display:"inline-block",width:6,height:6,borderRadius:"50%",background:"#00ffcc",marginRight:5}}/>BOOT-UP · PROCESSING
+                </div>
+                <div style={{display:"flex",gap:5}}>
+                  {[0,1,2].map(i=><div key={i} style={{width:7,height:7,borderRadius:"50%",background:"#00ffcc",animation:`bounce 1.2s ${i*0.2}s infinite`}}/>)}
+                </div>
+              </div>
+            )}
+          </div>
+          <div style={{flexShrink:0,padding:"12px 14px",borderTop:"1px solid rgba(0,255,204,0.2)",background:"rgba(0,10,20,0.85)",display:"flex",gap:8,alignItems:"flex-end"}}>
+            <textarea value={inputText} onChange={e=>setInputText(e.target.value)}
+              onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage();}}}
+              disabled={loading} placeholder="Ask about wiring, pinouts, code, robotics..."
+              rows={1} style={{flex:1,background:"rgba(0,255,204,0.04)",border:"1px solid rgba(0,255,204,0.2)",color:"#c8e6ff",fontFamily:"'Courier New',monospace",fontSize:13,padding:"9px 12px",outline:"none",resize:"none",minHeight:40,maxHeight:110,borderRadius:2,lineHeight:1.4,opacity:loading?0.5:1,cursor:loading?"not-allowed":"text"}}
+            />
+            <button onClick={sendMessage} disabled={loading}
+              style={{background:loading?"rgba(0,255,204,0.05)":"transparent",border:"1px solid #00ffcc",color:"#00ffcc",fontFamily:"monospace",fontSize:10,padding:"9px 18px",cursor:loading?"not-allowed":"pointer",letterSpacing:2,height:40,opacity:loading?0.5:1,transition:"all 0.2s"}}
+              onMouseEnter={e=>{if(!loading){e.target.style.background="#00ffcc";e.target.style.color="#050810";}}}
+              onMouseLeave={e=>{e.target.style.background="transparent";e.target.style.color="#00ffcc";}}
+            >SEND ›</button>
+          </div>
+        </div>
+      </div>
+
+      <style>{`
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+        @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-6px)}}
+        ::-webkit-scrollbar{width:5px}
+        ::-webkit-scrollbar-track{background:rgba(0,255,204,0.02)}
+        ::-webkit-scrollbar-thumb{background:rgba(0,255,204,0.2);border-radius:3px}
+        ::-webkit-scrollbar-thumb:hover{background:rgba(0,255,204,0.45)}
+        textarea::placeholder{color:rgba(200,230,255,0.25)}
+        input::placeholder{color:rgba(0,255,204,0.3)}
+      `}</style>
+    </div>
+  );
+}
